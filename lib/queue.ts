@@ -2,7 +2,7 @@ import redis from "./redis";
 
 const QUEUE_KEY = "urltopdf:queue";
 const RATE_LIMIT_PREFIX = "pdfco:rate:";
-const RATE_LIMIT_PER_SECOND = 2;
+const RATE_LIMIT_PER_SECOND = Number(process.env.KHANPDF_RATE_LIMIT_PER_SECOND ?? 2);
 
 export type JobStatus = "queued" | "processing" | "done" | "failed";
 
