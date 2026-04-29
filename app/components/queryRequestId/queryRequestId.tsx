@@ -2,13 +2,21 @@
 
 import { useState } from "react";
 
+type ResultStatus = "done" | "processing" | "failed" | "not_found" | "network_error" | null;
+
 export default function QueryRequestId() {
   const [requestId, setRequestId] = useState("");
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<{
-    status: "done" | "processing" | "failed" | "expired" | null;
-    fileUrl?: string;
-  }>({ status: null });
+  const [copied, setCopied] = useState(false);
+  const [result, setResult] = useState<{ status: ResultStatus; fileUrl?: string }>({
+    status: null,
+  });
+
+  async function copyUrl(url: string) {
+    await navigator.clipboard.writeText(url);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
 
   async function handleFetch() {
     const id = requestId.trim();
@@ -27,12 +35,14 @@ export default function QueryRequestId() {
         setResult({ status: "done", fileUrl: data.fileUrl });
       } else if (data.status === "processing") {
         setResult({ status: "processing" });
+      } else if (data.status === "failed") {
+        setResult({ status: "failed" });
       } else {
-        // "failed" from the API means not found or genuinely failed
-        setResult({ status: "expired" });
+        // "not_found" — key not in Redis (expired or never saved)
+        setResult({ status: "not_found" });
       }
     } catch {
-      setResult({ status: "failed" });
+      setResult({ status: "network_error" });
     } finally {
       setLoading(false);
     }
@@ -70,9 +80,19 @@ export default function QueryRequestId() {
         {/* Done */}
         {result.status === "done" && result.fileUrl && (
           <div className="mt-5 rounded-xl bg-green-50 border border-green-200 p-4">
-            <p className="text-green-700 text-sm font-semibold mb-2">
-              ✓ PDF Ready
-            </p>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-green-700 text-sm font-semibold">✓ PDF Ready</p>
+              <button
+                onClick={() => copyUrl(result.fileUrl!)}
+                className={`text-xs px-3 py-1 rounded-lg border transition-colors ${
+                  copied
+                    ? "border-green-400 text-green-600 bg-green-100"
+                    : "border-green-300 text-green-700 hover:bg-green-100"
+                }`}
+              >
+                {copied ? "Copied!" : "Copy URL"}
+              </button>
+            </div>
             <a
               href={result.fileUrl}
               target="_blank"
@@ -84,7 +104,7 @@ export default function QueryRequestId() {
           </div>
         )}
 
-        {/* Processing */}
+        {/* Still processing */}
         {result.status === "processing" && (
           <div className="mt-5 rounded-xl bg-blue-50 border border-blue-200 p-4">
             <p className="text-blue-700 text-sm font-medium">
@@ -93,20 +113,29 @@ export default function QueryRequestId() {
           </div>
         )}
 
-        {/* Expired / not found */}
-        {result.status === "expired" && (
+        {/* PDF.co genuinely failed */}
+        {result.status === "failed" && (
+          <div className="mt-5 rounded-xl bg-red-50 border border-red-200 p-4">
+            <p className="text-red-600 text-sm font-medium">
+              PDF conversion failed for this request. No result is available.
+            </p>
+          </div>
+        )}
+
+        {/* Not in Redis — expired or invalid */}
+        {result.status === "not_found" && (
           <div className="mt-5 rounded-xl bg-yellow-50 border border-yellow-200 p-4">
             <p className="text-yellow-700 text-sm font-medium">
-              Result not found. The Request ID may be expired or invalid.
+              Result not found. The Request ID may be expired (&gt;1 hour) or invalid.
             </p>
           </div>
         )}
 
         {/* Network error */}
-        {result.status === "failed" && (
-          <div className="mt-5 rounded-xl bg-red-50 border border-red-200 p-4">
-            <p className="text-red-600 text-sm font-medium">
-              Request failed. Check your connection and try again.
+        {result.status === "network_error" && (
+          <div className="mt-5 rounded-xl bg-gray-50 border border-gray-200 p-4">
+            <p className="text-gray-600 text-sm font-medium">
+              Network error. Check your connection and try again.
             </p>
           </div>
         )}

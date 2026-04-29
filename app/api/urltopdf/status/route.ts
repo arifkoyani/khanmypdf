@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import redis from "@/lib/redis";
 import type { JobData } from "@/lib/queue";
 
-const SEEN_DONE_TTL = 3600; // keep result for 1 hour after first read
+const SEEN_DONE_TTL = 3600;
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -16,13 +16,13 @@ export async function GET(req: NextRequest) {
   try {
     job = await redis.get<JobData>(`job:${requestId}`);
   } catch (err) {
-    // Transient Redis error (DNS, timeout, etc.) — tell the client to keep polling
     console.error("[status] Redis error:", err);
     return NextResponse.json({ status: "processing" });
   }
 
+  // Distinct status for "key not in Redis" vs "job explicitly failed"
   if (!job) {
-    return NextResponse.json({ status: "failed" });
+    return NextResponse.json({ status: "not_found" });
   }
 
   if (job.status === "done") {

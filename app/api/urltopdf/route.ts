@@ -7,7 +7,9 @@ import { submitPdfJob } from "@/lib/pdfco";
 
 const APP_BASE_URL = (process.env.APP_BASE_URL ?? "").replace(/\/$/, "");
 const JOB_TTL = 3600;
-const DONE_TTL = 3600; // keep done/failed results for 1 hour
+const DONE_TTL = 3600;
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 1000;
 
 export async function POST(req: NextRequest) {
   try {
@@ -38,7 +40,6 @@ export async function POST(req: NextRequest) {
       console.warn("[urltopdf] Redis initial save failed:", err);
     }
 
-    // Check rate limit; default to allowed when Redis is unreachable
     let allowed = true;
     try {
       allowed = await checkAndConsumeRateLimit();
@@ -50,14 +51,11 @@ export async function POST(req: NextRequest) {
       return await callPdfCo(requestId, url, job);
     }
 
-    // ── Slow path: rate-limited → hand off to QStash ────────────────────────
-    // If QStash is unreachable (e.g. local dev), fall back to calling PDF.co
-    // directly so the request never hard-fails just because of QStash.
     try {
       await enqueueJob(requestId);
       await qstash.publishJSON({
         url: `${APP_BASE_URL}/api/urltopdf/submit`,
-        body: { requestId },
+        body: { requestId, url }, // url carried so submit worker can reconstruct job if Redis is empty
       });
       return NextResponse.json({ success: true, requestId, status: "processing" });
     } catch (err) {
@@ -70,33 +68,46 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// Shared helper: call PDF.co directly and return an immediate response.
 async function callPdfCo(
   requestId: string,
   url: string,
   job: JobData
 ): Promise<Response> {
-  try {
-    const fileUrl = await submitPdfJob(url);
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
-      await redis.set(
-        `job:${requestId}`,
-        { ...job, status: "done", fileUrl },
-        { ex: DONE_TTL }
-      );
+      const fileUrl = await submitPdfJob(url);
+
+      try {
+        await redis.set(
+          `job:${requestId}`,
+          { ...job, status: "done", fileUrl },
+          { ex: DONE_TTL }
+        );
+      } catch (err) {
+        console.warn("[urltopdf] Redis done-save failed:", err);
+      }
+
+      return NextResponse.json({ success: true, requestId, status: "done", fileUrl });
     } catch (err) {
-      console.warn("[urltopdf] Redis done-save failed:", err);
+      lastError = err;
+      console.warn(`[urltopdf] PDF.co attempt ${attempt}/${MAX_RETRIES} failed for ${requestId}:`, err);
+
+      if (attempt < MAX_RETRIES) {
+        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+      }
     }
-    return NextResponse.json({ success: true, requestId, status: "done", fileUrl });
-  } catch (err) {
-    console.error(`[urltopdf] PDF.co failed for ${requestId}:`, err);
-    try {
-      await redis.set(
-        `job:${requestId}`,
-        { ...job, status: "failed" },
-        { ex: DONE_TTL }
-      );
-    } catch {}
-    return NextResponse.json({ success: true, requestId, status: "failed" });
   }
+
+  console.error(`[urltopdf] All ${MAX_RETRIES} attempts failed for ${requestId}:`, lastError);
+  try {
+    await redis.set(
+      `job:${requestId}`,
+      { ...job, status: "failed" },
+      { ex: DONE_TTL }
+    );
+  } catch {}
+
+  return NextResponse.json({ success: true, requestId, status: "failed" });
 }
