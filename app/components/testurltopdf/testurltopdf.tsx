@@ -4,12 +4,9 @@ import { useState, useRef } from "react";
 
 const STATIC_URL = "https://khanpdf.com/";
 
-type IntakeStatus = "done" | "processing" | "failed";
-
 interface Job {
   index: number;
   requestId: string;
-  intakeStatus: IntakeStatus | "pending";
   copied: boolean;
 }
 
@@ -50,7 +47,6 @@ export default function TestUrlToPdf() {
         ...batchIndexes.map((idx) => ({
           index: idx,
           requestId: "",
-          intakeStatus: "pending" as const,
           copied: false,
         })),
       ]);
@@ -64,15 +60,11 @@ export default function TestUrlToPdf() {
               body: JSON.stringify({ url: STATIC_URL }),
             });
             const data = await res.json();
-
             if (!data.requestId) throw new Error("No requestId");
-
-            const intakeStatus: IntakeStatus = data.status ?? "failed";
-            updateJob(idx, { requestId: data.requestId, intakeStatus });
-            addLog(`#${idx + 1} [${intakeStatus}] → ${data.requestId}`);
+            updateJob(idx, { requestId: data.requestId });
+            addLog(`#${idx + 1} → ${data.requestId}`);
           } catch {
-            updateJob(idx, { intakeStatus: "failed" });
-            addLog(`#${idx + 1} submit error`);
+            addLog(`#${idx + 1} failed`);
           }
         })
       );
@@ -99,17 +91,6 @@ export default function TestUrlToPdf() {
     setTimeout(() => updateJob(index, { copied: false }), 1500);
   }
 
-  const doneCount = jobs.filter((j) => j.intakeStatus === "done").length;
-  const processingCount = jobs.filter((j) => j.intakeStatus === "processing").length;
-  const failedCount = jobs.filter((j) => j.intakeStatus === "failed").length;
-
-  const labelStyle = (s: Job["intakeStatus"]) => {
-    if (s === "done") return "bg-green-100 text-green-700";
-    if (s === "processing") return "bg-blue-100 text-blue-600";
-    if (s === "failed") return "bg-red-100 text-red-600";
-    return "bg-gray-100 text-gray-400";
-  };
-
   return (
     <main className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-2xl mx-auto space-y-5">
@@ -121,7 +102,7 @@ export default function TestUrlToPdf() {
           <p className="text-sm text-gray-500 mt-1">
             Sends requests and shows the{" "}
             <code className="bg-gray-100 rounded px-1 text-xs">requestId</code>{" "}
-            and intake status for each one.
+            returned by each one.
           </p>
         </div>
 
@@ -189,28 +170,6 @@ export default function TestUrlToPdf() {
           </div>
         </div>
 
-        {/* Stats */}
-        {jobs.length > 0 && (
-          <div className="flex flex-wrap gap-4 text-sm px-1">
-            <span className="text-gray-500">
-              Sent <span className="font-semibold text-gray-900">{jobs.length}</span>
-            </span>
-            <span className="text-green-600">
-              Done <span className="font-semibold">{doneCount}</span>
-            </span>
-            {processingCount > 0 && (
-              <span className="text-blue-600">
-                Queued <span className="font-semibold">{processingCount}</span>
-              </span>
-            )}
-            {failedCount > 0 && (
-              <span className="text-red-500">
-                Failed <span className="font-semibold">{failedCount}</span>
-              </span>
-            )}
-          </div>
-        )}
-
         {/* Request ID list */}
         {jobs.length > 0 && (
           <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
@@ -223,20 +182,11 @@ export default function TestUrlToPdf() {
                   #{job.index + 1}
                 </span>
 
-                {/* Status label */}
-                <span
-                  className={`text-xs font-medium px-2.5 py-0.5 rounded-full shrink-0 ${labelStyle(job.intakeStatus)}`}
-                >
-                  {job.intakeStatus}
-                </span>
-
-                {/* Request ID */}
                 <span className="flex-1 text-xs font-mono text-gray-700 truncate">
                   {job.requestId || "—"}
                 </span>
 
-                {/* Copy button — only for done/processing (has a real requestId) */}
-                {job.requestId && job.intakeStatus !== "failed" && (
+                {job.requestId && (
                   <button
                     onClick={() => copyId(job.index, job.requestId)}
                     className={`shrink-0 text-xs px-3 py-1 rounded-lg border transition-colors ${
@@ -247,11 +197,6 @@ export default function TestUrlToPdf() {
                   >
                     {job.copied ? "Copied!" : "Copy"}
                   </button>
-                )}
-
-                {/* Failed — no copy button, explain why */}
-                {job.intakeStatus === "failed" && (
-                  <span className="text-xs text-red-400 shrink-0">no result</span>
                 )}
               </div>
             ))}
