@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import redis from "@/lib/redis";
 import type { JobData } from "@/lib/queue";
 
-const SEEN_DONE_TTL = 60;
+const SEEN_DONE_TTL = 3600; // keep result for 1 hour after first read
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);

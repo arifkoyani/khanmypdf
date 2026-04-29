@@ -7,7 +7,7 @@ import { submitPdfJob } from "@/lib/pdfco";
 
 const APP_BASE_URL = (process.env.APP_BASE_URL ?? "").replace(/\/$/, "");
 const JOB_TTL = 3600;
-const DONE_TTL = 300;
+const DONE_TTL = 3600; // keep done/failed results for 1 hour
 
 export async function POST(req: NextRequest) {
   try {
