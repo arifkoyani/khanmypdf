@@ -63,7 +63,7 @@ export default function UrlToPdf() {
           setResultUrl(data.fileUrl);
         }
 
-        if (data?.status === "failed") {
+        if (data?.status === "failed" || data?.status === "not_found") {
           clearInterval(interval);
           setStatus("");
           setError("PDF conversion failed. Please try another URL.");

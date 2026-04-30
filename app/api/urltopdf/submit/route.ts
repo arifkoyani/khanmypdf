@@ -1,13 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import redis from "@/lib/redis";
-import { qstash, qstashReceiver } from "@/lib/qstash";
+import { qstashReceiver } from "@/lib/qstash";
 import { submitPdfJob } from "@/lib/pdfco";
-import { checkAndConsumeRateLimit, type JobData } from "@/lib/queue";
+import type { JobData } from "@/lib/queue";
 
-const APP_BASE_URL = (process.env.APP_BASE_URL ?? "").replace(/\/$/, "");
 const JOB_TTL = 3600;
 const DONE_TTL = 3600;
-const RATE_RETRY_DELAY = 1;
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1000;
 
@@ -21,8 +19,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // url is carried in every QStash message so we can reconstruct
-  // the job even if the initial Redis save failed
   const { requestId, url } = JSON.parse(rawBody) as {
     requestId: string;
     url: string;
@@ -32,7 +28,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Missing requestId or url" }, { status: 400 });
   }
 
-  // Try to load job from Redis; if missing, reconstruct from message payload
+  // Load job from Redis; reconstruct from message payload if Redis save failed
   let job: JobData | null = null;
   try {
     job = await redis.get<JobData>(`job:${requestId}`);
@@ -41,7 +37,6 @@ export async function POST(req: NextRequest) {
   }
 
   if (!job) {
-    // Redis save in intake failed silently — rebuild from QStash message
     job = { requestId, url, status: "queued", retries: 0, createdAt: Date.now() };
     try {
       await redis.set(`job:${requestId}`, job, { ex: JOB_TTL });
@@ -54,25 +49,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, skipped: `status is ${job.status}` });
   }
 
-  // Rate limit check — if Redis is down, default to allowed
-  let allowed = true;
-  try {
-    allowed = await checkAndConsumeRateLimit();
-  } catch (err) {
-    console.warn("[submit] Rate-limit check failed, defaulting to allowed:", err);
-  }
-
-  if (!allowed) {
-    // Pass url along so the rescheduled worker also has it
-    await qstash.publishJSON({
-      url: `${APP_BASE_URL}/api/urltopdf/submit`,
-      body: { requestId, url },
-      delay: RATE_RETRY_DELAY,
-    });
-    return NextResponse.json({ ok: true, rescheduled: true });
-  }
-
-  // Mark as processing to prevent duplicate workers
+  // Mark processing to prevent duplicate workers
   try {
     await redis.set(
       `job:${requestId}`,
@@ -83,7 +60,7 @@ export async function POST(req: NextRequest) {
     console.warn(`[submit] Redis processing-save failed for ${requestId}:`, err);
   }
 
-  // Retry loop — same as the fast path in the intake route
+  // Call PDF.co with retries — rate is controlled by QStash flowControl upstream
   let lastError: unknown;
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
