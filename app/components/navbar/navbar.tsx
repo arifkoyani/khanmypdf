@@ -7,7 +7,6 @@ import Image from "next/image";
 const navLinks = [
   { label: "Home", href: "/" },
   { label: "URL to PDF", href: "/url-to-pdf" },
-  { label: "Contact", href: "/contact" },
   { label: "FAQs", href: "/faqs" },
   { label: "Blog", href: "/blog" },
 ];
